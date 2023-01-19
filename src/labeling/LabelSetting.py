@@ -37,6 +37,8 @@ class Label:
         self.routing_time = routing_time
         self.demand = demand
         self.pre_label = pre_label
+        self.is_node_reachable = []
+        self.reachable_nodes_num = 0
 
     def dominate(self, other, flag=False) -> bool:
         """Check whether can dominate other label.
@@ -45,17 +47,25 @@ class Label:
 
         Args:
             other: other label
-            flag: whether sink node or not
+            flag: whether it is sink node or not
 
         Returns: whether the label can dominate the other label.
 
         """
-        # if it is sink node
+        # If it is sink node
         if flag:
             return self.revised_cost < other.revised_cost
-        # otherwise,
+        # Otherwise:
         if (self.demand > other.demand) or (self.revised_cost > other.revised_cost) or (self.routing_time > other.routing_time):
             return False
+        # If reachable nodes is smaller than other label, then it cannot dominate other.
+        if self.reachable_nodes_num < other.reachable_nodes_num:
+            return False
+        # If there exists unreachable nodes that other label can reach, then it cannot dominate other.
+        for i in range(len(self.is_node_reachable)):
+            if (not self.is_node_reachable[i]) and other.is_node_reachable[i]:
+                return False
+
         return True
 
     def get_visited_nodes(self) -> list:
@@ -68,6 +78,13 @@ class Label:
         # reverse visited nodes
         node_list.reverse()
         return node_list
+
+    def update_reachable_nodes(self, reachable_nodes: list):
+        """Update reachable node set."""
+        self.is_node_reachable = reachable_nodes[:]
+        for item in reachable_nodes:
+            if item:
+                self.reachable_nodes_num += 1
 
     def __eq__(self, other):
         if self.graph_node_id != other.graph_node_id:
@@ -137,6 +154,8 @@ class LabelSetting:
         self.graph.revise_cost_map(dual_val)
         # Start from source node
         init_label = Label(0, 0, 0, 0)
+        reachable_nodes = self._cal_reachable_nodes([True for _ in range(self.graph.node_num)], init_label)
+        init_label.update_reachable_nodes(reachable_nodes)
         self._label_dict[0].append(init_label)
         self._unprocessed_labels.put_nowait(init_label)
 
@@ -156,19 +175,47 @@ class LabelSetting:
     def label_extension(self, cur_label: Label, out_edge: GraphEdge):
         """Extend label to reachable nodes."""
         cur_node_id, next_node_id = cur_label.graph_node_id, out_edge.to_
+
+        if not cur_label.is_node_reachable[next_node_id]:
+            return
+
         demand = cur_label.demand + self.graph.node_list[next_node_id].demand
-        if demand > self.capacity:
-            return
+
         routing_time = cur_label.routing_time + self.graph.node_list[next_node_id].service_time + out_edge.routing_time
-        if routing_time > self.graph.node_list[next_node_id].latest_time:
-            return
+
         if routing_time < self.graph.node_list[next_node_id].earliest_time:
             routing_time = self.graph.node_list[next_node_id].earliest_time
 
         revised_cost = cur_label.revised_cost + self.graph.revised_cost_map[cur_node_id, next_node_id]
         new_label = Label(next_node_id, revised_cost, routing_time, demand, pre_label=cur_label)
+        new_label.update_reachable_nodes(self._cal_reachable_nodes(cur_label.is_node_reachable, new_label))
+
         # Use dominance rule to check whether can be dominated by other labels
         self.dominance(new_label)
+
+    def _cal_reachable_nodes(self, pre_label_reachable_nodes: list, new_label: Label) -> list:
+        """Calculate reachable nodes set."""
+        next_node_id = new_label.graph_node_id
+        # Cal reachable nodes set
+        # Note that, since the routing time and demand are non-decreasing,
+        # the unreachable nodes of last label must be unreachable for the
+        # current node.
+        reachable_nodes = pre_label_reachable_nodes[:]
+        # set the current node as unreachable
+        reachable_nodes[next_node_id] = False
+        # Check the reachable node of last label whether still reachable.
+        for edge in self.graph.edge_dict[next_node_id]:
+            to_ = edge.to_
+            if not reachable_nodes[to_]:
+                continue
+            demand = new_label.demand + self.graph.node_list[to_].demand
+            if demand > self.capacity:
+                reachable_nodes[to_] = False
+            routing_time = new_label.routing_time + self.graph.node_list[to_].service_time + edge.routing_time
+            if routing_time > self.graph.node_list[to_].latest_time:
+                reachable_nodes[to_] = False
+
+        return reachable_nodes
 
     def dominance(self, label_2_compare: Label):
         """Use basic dominance rule."""

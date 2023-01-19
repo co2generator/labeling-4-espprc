@@ -56,7 +56,7 @@ class LabelSettingTest:
                     y_1, y_2 = self.node_list[i].y_coord, self.node_list[j].y_coord
                     euclidean_distance = self._cal_euclidean_distance(x_1, x_2, y_1, y_2)
                     cost = randint(1, 5) * euclidean_distance
-                    routing_time = 1 * euclidean_distance
+                    routing_time = 15 * euclidean_distance
                     temp.append(
                         GraphEdge(
                             i,
@@ -81,8 +81,8 @@ class LabelSettingTest:
 
     def run(self):
         # randomly generate dual value
-        dual_val = [200 * random() for _ in range(self.node_num)]
-        # dual_val = [0 for _ in range(100)]
+        dual_val = [100 * random() for _ in range(self.node_num)]
+        # dual_val = [0 for _ in range(self.node_num)]
         start_ = time()
         self.label_setting.solve(dual_val)
         end_ = time()
